@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import { Effect } from "effect"
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeBuilds, type Exec } from "../src/build"
@@ -119,7 +119,7 @@ describe("builds", () => {
   })
 
   test("windows copies an exe and installs an msi with msiexec", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cua-builds-"))
+    const root = await realpath(await mkdtemp(join(tmpdir(), "cua-builds-")))
     const home = join(root, "home")
     const exe = join(root, "s1", "Acme.exe")
     const msi = join(root, "s1", "Acme.msi")
@@ -145,7 +145,7 @@ describe("builds", () => {
   })
 
   test("linux copies an AppImage and installs a deb with dpkg", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cua-builds-"))
+    const root = await realpath(await mkdtemp(join(tmpdir(), "cua-builds-")))
     const home = join(root, "home")
     const image = join(root, "s1", "Acme.AppImage")
     const deb = join(root, "s1", "acme.deb")

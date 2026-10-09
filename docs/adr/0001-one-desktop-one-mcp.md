@@ -4,7 +4,7 @@ A coding agent should drive a test desktop that is not the desktop the human is 
 
 The hold lives on that runner. One holder drives the screen. A second holder gets `desktop_busy` until release or expiry. Computer tools, `fetch_build`, and `install_build` require the `session_id` from `claim_session`.
 
-The listen port is 3213, beside cua-spacesd on 3211. HTTP is Bun.serve: source-address filtering needs the connection peer, and the relay is a long-poll. Effect owns the hold, the runner, and MCP decode.
+The listen port is 3213, beside cua-spacesd on 3211. HTTP is Node http server: source-address filtering needs the connection peer, and the relay is a long-poll. Effect owns the hold, the runner, and MCP decode.
 
 ## Considered options
 

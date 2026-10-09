@@ -24,14 +24,14 @@ export async function relayLoop(opts: {
         runner_id: opts.runnerId,
         name: opts.name,
         placement: opts.placement,
-      })
+      }, opts.signal)
       const generation = isRecord(hello) && typeof hello["generation"] === "number" ? hello["generation"] : undefined
       if (generation === undefined) throw new Error("Relay hello returned no generation.")
       while (!opts.signal.aborted) {
         const pulled = await post(origin, opts.token, "/relay/pull", {
           runner_id: opts.runnerId,
           generation,
-        })
+        }, opts.signal)
         if (!isRecord(pulled)) break
         if (pulled["error"] === "stale" || pulled["error"] === "pull_in_progress") break
         if (pulled["idle"] === true) continue
@@ -52,7 +52,7 @@ export async function relayLoop(opts: {
           status: handled.status,
           content_type: handled.contentType,
           body_text: handled.bodyText,
-        })
+        }, opts.signal)
       }
     } catch (error) {
       if (opts.signal.aborted) return
@@ -62,7 +62,8 @@ export async function relayLoop(opts: {
   }
 }
 
-async function post(origin: string, token: string, path: string, body: unknown): Promise<unknown> {
+async function post(origin: string, token: string, path: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
+  const combinedSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000)
   const response = await fetch(`${origin}${path}`, {
     method: "POST",
     headers: {
@@ -71,7 +72,7 @@ async function post(origin: string, token: string, path: string, body: unknown):
       authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120_000),
+    signal: combinedSignal,
   })
   const text = await response.text()
   if (response.status >= 500) throw new Error(`Relay ${path} returned HTTP ${response.status}.`)

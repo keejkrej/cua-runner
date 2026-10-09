@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process"
 import { Effect } from "effect"
 import { encodeFrame, FrameParser } from "./stdio-frame"
 import { VERSION, asToolResult, isRecord, toolError, type Driver, type ToolDefinition, type ToolResult } from "./types"
@@ -8,7 +9,9 @@ type Pending = {
 }
 
 export async function startCuaDriver(command: readonly string[]): Promise<{ driver: Driver; close: () => void }> {
-  const proc = Bun.spawn([...command], { stdin: "pipe", stdout: "pipe", stderr: "pipe" })
+  const [cmd, ...args] = command
+  if (!cmd) throw new Error("Command cannot be empty")
+  const proc = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] })
   const pending = new Map<number, Pending>()
   let nextId = 1
   const parser = new FrameParser()
@@ -16,43 +19,35 @@ export async function startCuaDriver(command: readonly string[]): Promise<{ driv
     for (const waiter of pending.values()) waiter.reject(error)
     pending.clear()
   }
-  void (async () => {
-    const reader = proc.stdout.getReader()
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (!value) continue
-        for (const message of parser.push(value)) {
-          if (!isRecord(message) || typeof message["id"] !== "number") continue
-          const waiter = pending.get(message["id"])
-          if (!waiter) continue
-          pending.delete(message["id"])
-          if (isRecord(message["error"])) {
-            const text = typeof message["error"]["message"] === "string" ? message["error"]["message"] : "MCP error"
-            waiter.reject(new Error(text))
-          } else {
-            waiter.resolve(message["result"])
-          }
-        }
+
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    for (const message of parser.push(new Uint8Array(chunk))) {
+      if (!isRecord(message) || typeof message["id"] !== "number") continue
+      const waiter = pending.get(message["id"])
+      if (!waiter) continue
+      pending.delete(message["id"])
+      if (isRecord(message["error"])) {
+        const text = typeof message["error"]["message"] === "string" ? message["error"]["message"] : "MCP error"
+        waiter.reject(new Error(text))
+      } else {
+        waiter.resolve(message["result"])
       }
-    } catch (error) {
-      failAll(error instanceof Error ? error : new Error("cua driver read failed"))
-    } finally {
-      failAll(new Error("cua driver closed"))
     }
-  })()
-  void (async () => {
-    const reader = proc.stderr.getReader()
-    while (true) {
-      const { done } = await reader.read()
-      if (done) break
-    }
-  })()
+  })
+
+  proc.stderr?.resume()
+
+  proc.on("error", (error) => {
+    failAll(error instanceof Error ? error : new Error("cua driver failed"))
+  })
+
+  proc.on("close", () => {
+    failAll(new Error("cua driver closed"))
+  })
 
   const send = async (method: string, params: unknown, notify = false): Promise<unknown> => {
     if (notify) {
-      proc.stdin.write(encodeFrame({ jsonrpc: "2.0", method, params }))
+      proc.stdin?.write(encodeFrame({ jsonrpc: "2.0", method, params }))
       return undefined
     }
     const id = nextId
@@ -60,7 +55,7 @@ export async function startCuaDriver(command: readonly string[]): Promise<{ driv
     const promise = new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject })
     })
-    proc.stdin.write(encodeFrame({ jsonrpc: "2.0", id, method, params }))
+    proc.stdin?.write(encodeFrame({ jsonrpc: "2.0", id, method, params }))
     return promise
   }
 

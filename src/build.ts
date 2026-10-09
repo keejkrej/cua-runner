@@ -1,3 +1,4 @@
+import { spawn, type ChildProcess } from "node:child_process"
 import { chmod, cp, mkdir, readdir, realpath, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
@@ -67,33 +68,43 @@ export function defaultBuildRoot(): string {
   return join(homedir(), ".cua-runner", "builds")
 }
 
-async function readPipe(stream: Bun.Subprocess["stdout"]): Promise<string> {
-  if (!stream || typeof stream === "number") return ""
-  return new Response(stream).text()
-}
-
 export async function spawnExec(argv: readonly string[], cwd?: string): Promise<ExecResult> {
-  let proc: Bun.Subprocess
-  try {
-    proc = Bun.spawn([...argv], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore" })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not start the command."
-    if (message.includes("ENOENT")) {
-      return { code: 127, stdout: "", stderr: "gh is not on PATH." }
+  const [cmd, ...args] = argv
+  if (!cmd) return { code: 1, stdout: "", stderr: "Empty command." }
+  return new Promise<ExecResult>((resolve) => {
+    let proc: ChildProcess
+    try {
+      proc = spawn(cmd, args, { cwd, stdio: ["ignore", "pipe", "pipe"] })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not start the command."
+      if (message.includes("ENOENT")) {
+        return resolve({ code: 127, stdout: "", stderr: "gh is not on PATH." })
+      }
+      return resolve({ code: 127, stdout: "", stderr: message })
     }
-    return { code: 127, stdout: "", stderr: message }
-  }
-  const killer = setTimeout(() => proc.kill(), 180_000)
-  try {
-    const [stdout, stderr, code] = await Promise.all([
-      readPipe(proc.stdout),
-      readPipe(proc.stderr),
-      proc.exited,
-    ])
-    return { code: code ?? 1, stdout: clip(stdout), stderr: clip(stderr) }
-  } finally {
-    clearTimeout(killer)
-  }
+    let stdout = ""
+    let stderr = ""
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8")
+    })
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8")
+    })
+    const killer = setTimeout(() => proc.kill(), 180_000)
+    proc.on("error", (error: Error) => {
+      clearTimeout(killer)
+      const message = error.message
+      if (message.includes("ENOENT")) {
+        resolve({ code: 127, stdout: "", stderr: "gh is not on PATH." })
+      } else {
+        resolve({ code: 127, stdout: "", stderr: message })
+      }
+    })
+    proc.on("close", (code) => {
+      clearTimeout(killer)
+      resolve({ code: code ?? 1, stdout: clip(stdout), stderr: clip(stderr) })
+    })
+  })
 }
 
 export function makeBuilds(input: { readonly root: string; readonly platform: string; readonly home: string; readonly exec: Exec }): {

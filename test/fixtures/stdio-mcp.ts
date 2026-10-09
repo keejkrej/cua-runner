@@ -2,21 +2,14 @@ import { encodeFrame, FrameParser } from "../../src/stdio-frame"
 import { isRecord } from "../../src/types"
 
 const parser = new FrameParser()
-const reader = Bun.stdin.stream().getReader()
-const decoder = new TextDecoder()
 
-while (true) {
-  const { done, value } = await reader.read()
-  if (done) break
-  if (!value) continue
-  const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value
-  void decoder
-  for (const message of parser.push(bytes)) {
+process.stdin.on("data", (chunk: Buffer) => {
+  for (const message of parser.push(new Uint8Array(chunk))) {
     if (!isRecord(message)) continue
     const response = handle(message)
     if (response) process.stdout.write(encodeFrame(response))
   }
-}
+})
 
 function handle(message: Record<string, unknown>): unknown {
   const id = message["id"]

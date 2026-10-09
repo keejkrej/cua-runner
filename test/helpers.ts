@@ -16,7 +16,7 @@ export async function startMemoryDesktop(opts: {
 }): Promise<{ server: RunningServer; surface: AgentSurface }> {
   const hold = await Effect.runPromise(makeHold())
   const surface = makeRunner({ facts: facts(opts.id, opts.placement), hold, driver: makeMemoryDriver() })
-  const server = startSurfaceServer(
+  const server = await startSurfaceServer(
     {
       hostname: "127.0.0.1",
       port: 0,

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "vitest"
 import { PIXEL_PNG } from "../src/memory-desktop"
 import { parsePayload } from "../src/codec"
 import type { RunningServer } from "../src/server"

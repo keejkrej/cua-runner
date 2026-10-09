@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { createServer } from "node:http"
+import type { AddressInfo } from "node:net"
+import { afterEach, describe, expect, test } from "vitest"
 import { Effect } from "effect"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -22,7 +24,7 @@ function startDispatch(desktops: unknown): Promise<{ server: RunningServer; surf
   return (async () => {
     const { loadDesktops } = await import("../src/config")
     const surface = await Effect.runPromise(makeDispatch(loadDesktops(path)))
-    const server = startSurfaceServer(
+    const server = await startSurfaceServer(
       { hostname: "127.0.0.1", port: 0, token: "dispatch", allowLan: false, allowPublic: false },
       surface,
     )
@@ -116,52 +118,71 @@ describe("dispatch", () => {
 
   test("holds a cloud-style MCP locally and strips session_id", async () => {
     const seen: unknown[] = []
-    const echo = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch: async (request) => {
-        const body = (await request.json()) as { id?: number; method?: string; params?: { arguments?: unknown } }
-        if (body.method === "initialize") {
-          return Response.json({
-            jsonrpc: "2.0",
-            id: body.id,
-            result: { protocolVersion: "2025-03-26", capabilities: {}, serverInfo: { name: "echo", version: "0" } },
-          })
-        }
-        if (body.method === "notifications/initialized") return new Response(null, { status: 202 })
-        if (body.method === "tools/list") {
-          return Response.json({
-            jsonrpc: "2.0",
-            id: body.id,
-            result: {
-              tools: [
-                {
-                  name: "echo",
-                  description: "Echo",
-                  inputSchema: { type: "object", properties: { message: { type: "string" } }, required: ["message"] },
-                },
-              ],
-            },
-          })
-        }
-        seen.push(body.params?.arguments)
-        return Response.json({
+    const echoServer = createServer(async (req, res) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of req) chunks.push(chunk)
+      const text = Buffer.concat(chunks).toString("utf8")
+      const body = (JSON.parse(text || "{}")) as { id?: number; method?: string; params?: { arguments?: unknown } }
+      if (body.method === "initialize") {
+        res.statusCode = 200
+        res.setHeader("content-type", "application/json")
+        res.end(JSON.stringify({
           jsonrpc: "2.0",
           id: body.id,
-          result: { content: [{ type: "text", text: "echoed" }], isError: false, structuredContent: { arguments: body.params?.arguments } },
-        })
-      },
+          result: { protocolVersion: "2025-03-26", capabilities: {}, serverInfo: { name: "echo", version: "0" } },
+        }))
+        return
+      }
+      if (body.method === "notifications/initialized") {
+        res.statusCode = 202
+        res.end()
+        return
+      }
+      if (body.method === "tools/list") {
+        res.statusCode = 200
+        res.setHeader("content-type", "application/json")
+        res.end(JSON.stringify({
+          jsonrpc: "2.0",
+          id: body.id,
+          result: {
+            tools: [
+              {
+                name: "echo",
+                description: "Echo",
+                inputSchema: { type: "object", properties: { message: { type: "string" } }, required: ["message"] },
+              },
+            ],
+          },
+        }))
+        return
+      }
+      seen.push(body.params?.arguments)
+      res.statusCode = 200
+      res.setHeader("content-type", "application/json")
+      res.end(JSON.stringify({
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { content: [{ type: "text", text: "echoed" }], isError: false, structuredContent: { arguments: body.params?.arguments } },
+      }))
     })
+    await new Promise<void>((resolve, reject) => {
+      echoServer.listen(0, "127.0.0.1", () => resolve())
+      echoServer.on("error", reject)
+    })
+    const echoPort = (echoServer.address() as AddressInfo).port
     servers.push({
-      port: echo.port ?? 0,
-      url: `http://127.0.0.1:${echo.port}`,
-      stop: () => echo.stop(true),
+      port: echoPort,
+      url: `http://127.0.0.1:${echoPort}`,
+      stop: () => {
+        echoServer.closeAllConnections?.()
+        echoServer.close()
+      },
     })
     const { server } = await startDispatch([
       {
         id: "cloud",
         name: "Hosted sandbox",
-        url: `http://127.0.0.1:${echo.port}/mcp`,
+        url: `http://127.0.0.1:${echoPort}/mcp`,
         placement: "cloud",
         lease: "local",
       },

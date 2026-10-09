@@ -13,14 +13,14 @@ Listen port is **3213**. `GET /health` is open and returns 204. `POST /mcp` is s
 ## Try it on this machine
 
 ```sh
-bun install
-bun src/index.ts serve
+pnpm install
+pnpm start serve
 ```
 
 Loopback with no token is allowed. Point an MCP client at `http://127.0.0.1:3213/mcp`, or print a client snippet:
 
 ```sh
-bun src/index.ts mcp-config --url http://127.0.0.1:3213/mcp --no-auth
+pnpm start mcp-config --url http://127.0.0.1:3213/mcp --no-auth
 ```
 
 The memory desktop has Calculator, Notes, and Safari. Claim a hold, launch Calculator, and click element indexes `6`, `11`, `7`, `12` (`6`, `+`, `7`, `=`). The display value is `13`. Read `get_window_state` text for the `[N]` element indexes. The screenshot is a fixed PNG; the state to trust is the text and `structuredContent`.
@@ -99,11 +99,11 @@ Accepted bearer headers: `authorization`, `x-cua-runner-authorization`, `x-cua-e
 ## Develop
 
 ```sh
-bun install
-bun run check
+pnpm install
+pnpm run check
 ```
 
-`bun run check` is typecheck, `bun test`, and oxlint. Effect is pinned to 3.22.2 so it passes the 7-day install age gate in `bunfig.toml`.
+`pnpm run check` is typecheck, `vitest run`, and oxlint.
 
 Environment overrides for flags: `CUA_RUNNER_TOKEN`, `CUA_RUNNER_LISTEN`, `CUA_RUNNER_NAME`, `CUA_RUNNER_ID`, `CUA_RUNNER_RELAY`. Flags win.
 

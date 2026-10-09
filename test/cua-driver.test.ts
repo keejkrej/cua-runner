@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import { Effect } from "effect"
 import { startCuaDriver } from "../src/cua-driver"
 import { FrameParser, encodeFrame } from "../src/stdio-frame"
@@ -15,7 +15,7 @@ describe("cua driver stdio", () => {
   })
 
   test("strips session_id before the driver sees the call", async () => {
-    const started = await startCuaDriver(["bun", "test/fixtures/stdio-mcp.ts"])
+    const started = await startCuaDriver([process.execPath, "--import", "tsx", "test/fixtures/stdio-mcp.ts"])
     try {
       const hold = await Effect.runPromise(makeHold())
       const surface = makeRunner({ facts: facts("mini"), hold, driver: started.driver })

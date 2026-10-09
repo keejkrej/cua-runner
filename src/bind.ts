@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from "node:crypto"
+
 export type AddressClass = "loopback" | "private" | "tailscale" | "unspecified" | "public" | "hostname"
 
 export type ListenPolicy = {
@@ -112,7 +114,7 @@ export function bearerFrom(headers: Headers): string | undefined {
 
 export function tokenMatches(expected: string, presented: string | undefined): boolean {
   if (presented === undefined) return false
-  const left = new Bun.CryptoHasher("sha256").update(expected).digest()
-  const right = new Bun.CryptoHasher("sha256").update(presented).digest()
-  return crypto.timingSafeEqual(left, right)
+  const left = createHash("sha256").update(expected).digest()
+  const right = createHash("sha256").update(presented).digest()
+  return timingSafeEqual(left, right)
 }

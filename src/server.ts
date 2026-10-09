@@ -1,3 +1,5 @@
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
+import type { AddressInfo } from "node:net"
 import { authorize, bearerFrom } from "./bind"
 import type { RelayHub } from "./relay-hub"
 import { handleSurfaceHttp } from "./surface-http"
@@ -19,107 +21,178 @@ export type RunningServer = {
 
 const MAX_BODY = 32 * 1024 * 1024
 
-function tooLarge(request: Request): boolean {
-  const length = request.headers.get("content-length")
-  return length !== null && Number(length) > MAX_BODY
-}
-
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
+function readBodyText(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    req.on("data", (chunk: Buffer) => chunks.push(chunk))
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")))
+    req.on("error", reject)
   })
 }
 
-export function startSurfaceServer(listen: ListenOptions, surface: AgentSurface): RunningServer {
-  const server = Bun.serve({
-    hostname: listen.hostname,
-    port: listen.port,
-    idleTimeout: 240,
-    fetch: async (request, bunServer) => {
-      if (tooLarge(request)) return json(413, { error: "body_too_large" })
-      const url = new URL(request.url)
-      if (request.method === "GET" && url.pathname === "/health") {
-        return new Response(null, { status: 204 })
-      }
-      const decision = authorize({
-        expectedToken: listen.token,
-        presentedToken: bearerFrom(request.headers),
-        remoteAddress: bunServer.requestIP(request)?.address ?? null,
-        allowPublic: listen.allowPublic,
-        listenHost: listen.hostname,
-      })
-      if (!decision.ok) return json(decision.status, { error: decision.code })
-      const bodyText = request.method === "GET" ? "" : await request.text()
-      const result = await handleSurfaceHttp({
-        method: request.method,
-        path: url.pathname,
-        bodyText,
-        accept: request.headers.get("accept"),
-        surface,
-      })
-      return new Response(result.bodyText.length > 0 ? result.bodyText : null, {
-        status: result.status,
-        headers: { "content-type": result.contentType },
-      })
-    },
+function reqHeaders(req: IncomingMessage): Headers {
+  const headers = new Headers()
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) {
+      for (const v of value) headers.append(key, v)
+    } else if (value !== undefined) {
+      headers.set(key, value)
+    }
+  }
+  return headers
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  res.statusCode = status
+  res.setHeader("content-type", "application/json")
+  res.end(JSON.stringify(body))
+}
+
+function sendResponse(res: ServerResponse, status: number, contentType: string, bodyText: string): void {
+  res.statusCode = status
+  res.setHeader("content-type", contentType)
+  res.end(bodyText.length > 0 ? bodyText : undefined)
+}
+
+export async function startSurfaceServer(listen: ListenOptions, surface: AgentSurface): Promise<RunningServer> {
+  const server = createServer(async (req, res) => {
+    const headers = reqHeaders(req)
+    const length = headers.get("content-length")
+    if (length !== null && Number(length) > MAX_BODY) {
+      sendJson(res, 413, { error: "body_too_large" })
+      return
+    }
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? listen.hostname}`)
+    if (req.method === "GET" && url.pathname === "/health") {
+      res.statusCode = 204
+      res.end()
+      return
+    }
+    const remoteAddress = req.socket.remoteAddress ?? null
+    const decision = authorize({
+      expectedToken: listen.token,
+      presentedToken: bearerFrom(headers),
+      remoteAddress,
+      allowPublic: listen.allowPublic,
+      listenHost: listen.hostname,
+    })
+    if (!decision.ok) {
+      sendJson(res, decision.status, { error: decision.code })
+      return
+    }
+    const bodyText = req.method === "GET" ? "" : await readBodyText(req)
+    const result = await handleSurfaceHttp({
+      method: req.method ?? "GET",
+      path: url.pathname,
+      bodyText,
+      accept: headers.get("accept"),
+      surface,
+    })
+    sendResponse(res, result.status, result.contentType, result.bodyText)
   })
+
+  await new Promise<void>((resolve, reject) => {
+    server.listen(listen.port, listen.hostname, () => resolve())
+    server.on("error", reject)
+  })
+
+  const addr = server.address() as AddressInfo | null
+  const port = addr ? addr.port : listen.port
   return {
-    port: server.port ?? listen.port,
-    url: `http://${listen.hostname}:${server.port ?? listen.port}`,
+    port,
+    url: `http://${listen.hostname}:${port}`,
     stop: () => {
-      server.stop(true)
+      server.closeAllConnections?.()
+      server.close()
     },
   }
 }
 
-export function startRelayServer(listen: ListenOptions, hub: RelayHub): RunningServer {
-  const server = Bun.serve({
-    hostname: listen.hostname,
-    port: listen.port,
-    idleTimeout: 240,
-    fetch: async (request, bunServer) => {
-      if (tooLarge(request)) return json(413, { error: "body_too_large" })
-      const url = new URL(request.url)
-      if (request.method === "GET" && url.pathname === "/health") {
-        return new Response(null, { status: 204 })
+export async function startRelayServer(listen: ListenOptions, hub: RelayHub): Promise<RunningServer> {
+  const server = createServer(async (req, res) => {
+    const headers = reqHeaders(req)
+    const length = headers.get("content-length")
+    if (length !== null && Number(length) > MAX_BODY) {
+      sendJson(res, 413, { error: "body_too_large" })
+      return
+    }
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? listen.hostname}`)
+    if (req.method === "GET" && url.pathname === "/health") {
+      res.statusCode = 204
+      res.end()
+      return
+    }
+    const remoteAddress = req.socket.remoteAddress ?? null
+    const decision = authorize({
+      expectedToken: listen.token,
+      presentedToken: bearerFrom(headers),
+      remoteAddress,
+      allowPublic: listen.allowPublic,
+      listenHost: listen.hostname,
+    })
+    if (!decision.ok) {
+      sendJson(res, decision.status, { error: decision.code })
+      return
+    }
+    const bodyText = req.method === "GET" ? "" : await readBodyText(req)
+    const parseJson = () => {
+      try {
+        return JSON.parse(bodyText)
+      } catch {
+        return null
       }
-      const decision = authorize({
-        expectedToken: listen.token,
-        presentedToken: bearerFrom(request.headers),
-        remoteAddress: bunServer.requestIP(request)?.address ?? null,
-        allowPublic: listen.allowPublic,
-        listenHost: listen.hostname,
+    }
+    if (req.method === "POST" && url.pathname === "/relay/hello") {
+      hello(hub, parseJson(), res)
+      return
+    }
+    if (req.method === "POST" && url.pathname === "/relay/pull") {
+      await pull(hub, parseJson(), res)
+      return
+    }
+    if (req.method === "POST" && url.pathname === "/relay/respond") {
+      respond(hub, parseJson(), res)
+      return
+    }
+    const proxied = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(\/mcp|\/health)$/.exec(url.pathname)
+    if (proxied && (req.method === "POST" || req.method === "GET")) {
+      const runnerId = proxied[1]
+      const path = proxied[2]
+      if (!runnerId || !path) {
+        res.statusCode = 404
+        res.end("not found")
+        return
+      }
+      const result = await hub.proxy(runnerId, {
+        method: req.method,
+        path,
+        bodyText: req.method === "GET" ? "" : bodyText,
+        accept: headers.get("accept"),
       })
-      if (!decision.ok) return json(decision.status, { error: decision.code })
-      if (request.method === "POST" && url.pathname === "/relay/hello") return hello(hub, await request.json().catch(() => null))
-      if (request.method === "POST" && url.pathname === "/relay/pull") return pull(hub, await request.json().catch(() => null))
-      if (request.method === "POST" && url.pathname === "/relay/respond") return respond(hub, await request.json().catch(() => null))
-      const proxied = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(\/mcp|\/health)$/.exec(url.pathname)
-      if (proxied && (request.method === "POST" || request.method === "GET")) {
-        const runnerId = proxied[1]
-        const path = proxied[2]
-        if (!runnerId || !path) return new Response("not found", { status: 404 })
-        const result = await hub.proxy(runnerId, {
-          method: request.method,
-          path,
-          bodyText: request.method === "GET" ? "" : await request.text(),
-          accept: request.headers.get("accept"),
-        })
-        if (!result.ok) return json(statusFor(result.code), { error: result.code })
-        return new Response(result.value.bodyText.length > 0 ? result.value.bodyText : null, {
-          status: result.value.status,
-          headers: { "content-type": result.value.contentType },
-        })
+      if (!result.ok) {
+        sendJson(res, statusFor(result.code), { error: result.code })
+        return
       }
-      return new Response("not found", { status: 404 })
-    },
+      sendResponse(res, result.value.status, result.value.contentType, result.value.bodyText)
+      return
+    }
+    res.statusCode = 404
+    res.end("not found")
   })
+
+  await new Promise<void>((resolve, reject) => {
+    server.listen(listen.port, listen.hostname, () => resolve())
+    server.on("error", reject)
+  })
+
+  const addr = server.address() as AddressInfo | null
+  const port = addr ? addr.port : listen.port
   return {
-    port: server.port ?? listen.port,
-    url: `http://${listen.hostname}:${server.port ?? listen.port}`,
+    port,
+    url: `http://${listen.hostname}:${port}`,
     stop: () => {
-      server.stop(true)
+      server.closeAllConnections?.()
+      server.close()
     },
   }
 }
@@ -143,24 +216,29 @@ function statusFor(code: string): number {
   }
 }
 
-async function hello(hub: RelayHub, body: unknown): Promise<Response> {
+function hello(hub: RelayHub, body: unknown, res: ServerResponse): void {
   if (!isRecord(body) || typeof body["runner_id"] !== "string" || typeof body["name"] !== "string") {
-    return json(400, { error: "invalid_hello" })
+    sendJson(res, 400, { error: "invalid_hello" })
+    return
   }
   const placement = typeof body["placement"] === "string" ? body["placement"] : "native"
-  return json(200, hub.hello({ runnerId: body["runner_id"], name: body["name"], placement }))
+  sendJson(res, 200, hub.hello({ runnerId: body["runner_id"], name: body["name"], placement }))
 }
 
-async function pull(hub: RelayHub, body: unknown): Promise<Response> {
+async function pull(hub: RelayHub, body: unknown, res: ServerResponse): Promise<void> {
   if (!isRecord(body) || typeof body["runner_id"] !== "string" || typeof body["generation"] !== "number") {
-    return json(400, { error: "invalid_pull" })
+    sendJson(res, 400, { error: "invalid_pull" })
+    return
   }
   const result = await hub.pull(body["runner_id"], body["generation"])
-  if (!result.ok) return json(statusFor(result.code), { error: result.code })
-  return json(200, result.value)
+  if (!result.ok) {
+    sendJson(res, statusFor(result.code), { error: result.code })
+    return
+  }
+  sendJson(res, 200, result.value)
 }
 
-async function respond(hub: RelayHub, body: unknown): Promise<Response> {
+function respond(hub: RelayHub, body: unknown, res: ServerResponse): void {
   if (
     !isRecord(body) ||
     typeof body["runner_id"] !== "string" ||
@@ -169,13 +247,17 @@ async function respond(hub: RelayHub, body: unknown): Promise<Response> {
     typeof body["status"] !== "number" ||
     typeof body["body_text"] !== "string"
   ) {
-    return json(400, { error: "invalid_respond" })
+    sendJson(res, 400, { error: "invalid_respond" })
+    return
   }
   const result = hub.respond(body["runner_id"], body["generation"], body["request_id"], {
     status: body["status"],
     contentType: typeof body["content_type"] === "string" ? body["content_type"] : "application/json",
     bodyText: body["body_text"],
   })
-  if (!result.ok) return json(statusFor(result.code), { error: result.code })
-  return json(200, result.value)
+  if (!result.ok) {
+    sendJson(res, statusFor(result.code), { error: result.code })
+    return
+  }
+  sendJson(res, 200, result.value)
 }

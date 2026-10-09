@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import { assertListenAllowed, authorize, classifyHost, tokenMatches } from "../src/bind"
 
 describe("bind policy", () => {

@@ -69,7 +69,7 @@ export async function main(argv: readonly string[], env: Record<string, string |
       server = started.server
       closeDriver = started.closeDriver
     } else {
-      server = startRelay(cli)
+      server = await startRelay(cli)
     }
     consoleLog("listen", {
       command: cli.command,
@@ -111,7 +111,7 @@ async function startServe(cli: ServeConfig, signal: AbortSignal): Promise<{ serv
         })
   const hold = await Effect.runPromise(makeHold())
   const surface = makeRunner({ facts, hold, driver, log: consoleLog })
-  const server = startSurfaceServer(
+  const server = await startSurfaceServer(
     {
       hostname: cli.listen.host,
       port: cli.listen.port,
@@ -139,9 +139,9 @@ async function startServe(cli: ServeConfig, signal: AbortSignal): Promise<{ serv
   return { server, ...(closeDriver ? { closeDriver } : {}) }
 }
 
-function startRelay(cli: RelayConfig): RunningServer {
+async function startRelay(cli: RelayConfig): Promise<RunningServer> {
   const hub = new RelayHub({ pullWaitMs: 20_000, proxyWaitMs: 90_000, maxPending: 8 })
-  return startRelayServer(
+  return await startRelayServer(
     {
       hostname: cli.listen.host,
       port: cli.listen.port,

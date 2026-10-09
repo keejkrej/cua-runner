@@ -13,22 +13,21 @@ Humans review this file regularly. Agents maintain it via the memory skill.
 ## Rules
 
 - Use the words in `CONTEXT.md`. A desktop is not a Space.
-- Effect owns the hold, the runner, dispatch, and MCP decode. Bun.serve owns HTTP, because peer filtering and the relay long-poll need the connection.
+- Effect owns the hold, the runner, dispatch, and MCP decode. Node HTTP server owns HTTP, because peer filtering and the relay long-poll need the connection.
 - Computer tool names stay aligned with Cua Driver. A new placement is a desktop record, not a new MCP.
 - A token is a credential. A holder is a label. Logs record claim, release, and desktop_busy. Logs omit tokens and tool arguments.
 - Extensionless TypeScript imports.
-- Verify with `bun run check`.
+- Verify with `pnpm run check`.
 - Read `CONTEXT.md` before renaming a domain concept. Read `docs/adr/0001-one-desktop-one-mcp.md` before adding a desktop surface. Read `docs/adr/0002-builds-and-tool-errors.md` before changing how a build is fetched or how a tool failure is reported. Read `docs/agents/open-questions.md` before adding a driver or a credential model.
 
 ## Tech stack
 
 <!-- memory:techstack-start -->
-- Bun is the runtime, package manager, and test runner. The server is plain Bun, with no web UI.
+- Node.js is the runtime, pnpm is the package manager, and vitest is the test runner.
 - Effect 3 for the hold, runner, dispatch, and MCP decode. Schema at the desktops-file boundary.
-- HTTP is Bun.serve: source-address filtering and the relay long-poll.
+- HTTP is Node http server: source-address filtering and the relay long-poll.
 - oxlint and `tsc --noEmit`. Extensionless TypeScript imports.
-- Registry installs respect bunfig `minimumReleaseAge` (7 days). Pin dependencies that pass that gate.
-- `bun run check` is the verification bar: typecheck, bun test, oxlint.
+- `pnpm run check` is the verification bar: typecheck, vitest, oxlint.
 <!-- memory:techstack-end -->
 
 ## Context

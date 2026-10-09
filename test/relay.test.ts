@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "vitest"
 import { Effect } from "effect"
 import { makeHold } from "../src/hold"
 import { makeMemoryDriver } from "../src/memory-desktop"
@@ -48,7 +48,7 @@ describe("relay", () => {
     const hold = await Effect.runPromise(makeHold())
     const surface = makeRunner({ facts: facts("mini"), hold, driver: makeMemoryDriver() })
     const hub = new RelayHub({ pullWaitMs: 20_000, proxyWaitMs: 5_000, maxPending: 4 })
-    const relay = startRelayServer(
+    const relay = await startRelayServer(
       { hostname: "127.0.0.1", port: 0, token: "relay-secret", allowLan: false, allowPublic: false },
       hub,
     )

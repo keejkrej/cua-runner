@@ -325,7 +325,7 @@ async function place(source: string, destination: string, executable: boolean): 
   const target = join(destination, basename(source))
   await mkdir(destination, { recursive: true })
   await rm(target, { recursive: true, force: true })
-  await cp(source, target, { recursive: true })
+  await cp(source, target, { recursive: true, verbatimSymlinks: true })
   if (executable) await chmod(target, 0o755)
   return target
 }

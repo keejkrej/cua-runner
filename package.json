@@ -1,0 +1,24 @@
+{
+  "name": "cua-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "cua-runner": "src/index.ts"
+  },
+  "scripts": {
+    "start": "bun src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test",
+    "lint": "oxlint src test",
+    "check": "tsc -p tsconfig.json --noEmit && bun test && oxlint src test"
+  },
+  "dependencies": {
+    "effect": "3.22.2"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "oxlint": "1.86.0",
+    "typescript": "5.8.3"
+  }
+}

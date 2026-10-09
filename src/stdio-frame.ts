@@ -1,7 +1,5 @@
 export function encodeFrame(message: unknown): Uint8Array {
-  const json = Buffer.from(JSON.stringify(message), "utf8")
-  const header = Buffer.from(`Content-Length: ${json.length}\r\n\r\n`, "utf8")
-  return Buffer.concat([header, json])
+  return Buffer.from(JSON.stringify(message) + "\n", "utf8")
 }
 
 export class FrameParser {
@@ -11,21 +9,43 @@ export class FrameParser {
     this.buf = Buffer.concat([this.buf, Buffer.from(chunk)])
     const messages: unknown[] = []
     while (true) {
+      if (this.buf.length === 0) return messages
+
       const headerEnd = this.buf.indexOf("\r\n\r\n")
-      if (headerEnd < 0) {
-        if (this.buf.length > 64 * 1024) throw new Error("MCP header exceeds 64 KiB.")
-        return messages
+      if (headerEnd >= 0) {
+        const header = this.buf.subarray(0, headerEnd).toString("utf8")
+        const match = /Content-Length:\s*(\d+)/i.exec(header)
+        if (match && match[1]) {
+          const length = Number(match[1])
+          const start = headerEnd + 4
+          if (this.buf.length < start + length) return messages
+          const body = this.buf.subarray(start, start + length).toString("utf8")
+          this.buf = Buffer.from(this.buf.subarray(start + length))
+          try {
+            messages.push(JSON.parse(body))
+          } catch {
+            // ignore
+          }
+          continue
+        }
       }
-      const header = this.buf.subarray(0, headerEnd).toString("utf8")
-      const match = /Content-Length:\s*(\d+)/i.exec(header)
-      const lengthText = match?.[1]
-      if (!lengthText) throw new Error("MCP frame is missing Content-Length.")
-      const length = Number(lengthText)
-      const start = headerEnd + 4
-      if (this.buf.length < start + length) return messages
-      const body = this.buf.subarray(start, start + length).toString("utf8")
-      this.buf = Buffer.from(this.buf.subarray(start + length))
-      messages.push(JSON.parse(body))
+
+      const newlineIdx = this.buf.indexOf(0x0a)
+      if (newlineIdx >= 0) {
+        const line = this.buf.subarray(0, newlineIdx).toString("utf8").trim()
+        this.buf = Buffer.from(this.buf.subarray(newlineIdx + 1))
+        if (!line) continue
+        if (line.startsWith("{") && line.endsWith("}")) {
+          try {
+            messages.push(JSON.parse(line))
+          } catch {
+            // ignore non-json line
+          }
+        }
+        continue
+      }
+
+      return messages
     }
   }
 }

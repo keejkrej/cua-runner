@@ -14,6 +14,15 @@ describe("cua driver stdio", () => {
     expect(parser.push(frame.subarray(5))).toEqual([{ ok: true }])
   })
 
+  test("handles newline-delimited json and ignores banner text", () => {
+    const parser = new FrameParser()
+    const input = Buffer.from(
+      "\n✨ update available\n\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n",
+      "utf8",
+    )
+    expect(parser.push(input)).toEqual([{ jsonrpc: "2.0", id: 1, result: { ok: true } }])
+  })
+
   test("strips session_id before the driver sees the call", async () => {
     const started = await startCuaDriver([process.execPath, "--import", "tsx", "test/fixtures/stdio-mcp.ts"])
     try {
